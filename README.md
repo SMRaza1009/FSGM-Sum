@@ -11,18 +11,17 @@
 |3.1.0|1.19.5|1.5.2|2.2.1|0.17.1|4.61.0|
 
 ```
-conda create -n CSTA python=3.8.5
-conda activate CSTA
-git clone https://github.com/thswodnjs3/CSTA.git
-cd CSTA
+conda create -n FSGM python=3.8.5
+conda activate FSGM
+git clone https://github.com/SMRaza1009/FSGM-Sum.git
+cd FSGM
 pip install -r requirements.txt
 ```
 
 [Back to top](https://github.com/thswodnjs3/CSTA?tab=readme-ov-file#csta-cnn-based-spatiotemporal-attention-for-video-summarization-cvpr-2024-paper)↑
 
 # Data
-~~Link: [Dataset](https://drive.google.com/drive/folders/1iGfKZxexQfOxyIaOWhfU0P687dJq_KWF?usp=drive_link) <br/>~~
- - I'm very sorry, but the dataset is no longer available. You can download it [here (PGL-SUM).](https://github.com/e-apostolidis/PGL-SUM) <br/> <br/>
+ -  You can download it [here (PGL-SUM).](https://github.com/e-apostolidis/PGL-SUM) <br/> <br/>
 H5py format of two benchmark video summarization preprocessed datasets (SumMe, TVSum). <br/>
 You should download datasets and put them in ```data/``` directory. <br/>
 The structure of the directory must be like below. <br/>
