@@ -38,10 +38,8 @@ You can see the details of both datasets below. <br/>
 [Back to top](https://github.com/thswodnjs3/CSTA?tab=readme-ov-file#csta-cnn-based-spatiotemporal-attention-for-video-summarization-cvpr-2024-paper)↑
 
 # Pre-trained models
-~~Link: [Weights](https://drive.google.com/drive/folders/1Z0WV_IJAHXV16sAGW7TmC9J_iFZQ9NSs?usp=drive_link)~~ <br/>
- - I'm very sorry, but the pre-trained weights are no longer available. <br/>
- I accidentally deleted it, but it can be implemented by using the same seed number below (123456). <br/>
- If you can't see the similar performance with the same seed, then please contact me. <br/> <br/>
+It can be implemented by using the same seed number below (123456). <br/>
+
 
 You can download our pre-trained weights of CSTA. <br/>
 There are 5 weights for the SumMe dataset and the other 5 for the TVSum dataset(1 weight for each split). <br/>
