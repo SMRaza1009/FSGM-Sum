@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local runs / outputs
+tmp/
+summary_videos/
+debug_preds/
+
+# Data / artifacts (usually too large for GitHub)
+data/*.h5
+weights/
+*.pt
+
+# OS
+.DS_Store
+
+
+weights/
+*.pt
+data/*.h5
+debug_preds/
+tmp/
+summary_videos/
