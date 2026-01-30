@@ -1,4 +1,4 @@
-# FSGM:FSGM-Sum: Factorized Spatio-Temporal Gating Mixer for Efficient Video Summarization 
+# FSGM-Sum: Factorized Spatio-Temporal Gating Mixer for Efficient Video Summarization 
 
 
 # Requirements
