@@ -6,21 +6,17 @@ __pycache__/
 
 # Local runs / outputs
 tmp/
+results/
 summary_videos/
-debug_preds/
 
-# Data / artifacts (usually too large for GitHub)
+# Data / weights (distributed separately; weights are attached to the GitHub release)
 data/*.h5
 weights/
+weights_*/
 *.pt
+
+# Manuscript sources and reviewer correspondence (not part of the public code)
+paper/
 
 # OS
 .DS_Store
-
-
-weights/
-*.pt
-data/*.h5
-debug_preds/
-tmp/
-summary_videos/

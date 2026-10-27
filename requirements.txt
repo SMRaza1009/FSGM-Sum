@@ -4,3 +4,6 @@ scipy==1.5.2
 torch==2.2.1
 torchvision==0.17.1
 tqdm==4.61.0
+# Only needed by generate_video.py (summaries of raw videos)
+opencv-python
+Pillow

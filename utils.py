@@ -4,143 +4,14 @@ import torch
 
 from collections import Counter
 
-# from models.EfficientNet import CSTA_EfficientNet
-# from models.GoogleNet import CSTA_GoogleNet
-# from models.MobileNet import CSTA_MobileNet
-# from models.ResNet import CSTA_ResNet
-# from models.FSGM import CSTA_FSGM
+# Count trainable parameters
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-# Count the number of parameters
-def count_parameters(model, model_name):
-    if model_name in ['GoogleNet','GoogleNet_Attention','ResNet','ResNet_Attention']:
-        x = [p.numel() for n,p in model.named_parameters() if p.requires_grad and 'fc' not in n]
-    elif model_name in ['EfficientNet','EfficientNet_Attention','MobileNet','MobileNet_Attention']:
-        x = [p.numel() for n,p in model.named_parameters() if p.requires_grad and 'classifier' not in n]
-    elif model_name in ['FSGM','FSGM_Attention']:
-        # Exclude classifier for apples-to-apples reporting (like others exclude fc/classifier)
-        x = [p.numel() for n,p in model.named_parameters()
-             if p.requires_grad and ('linear1' not in n and 'linear2' not in n)]
-    else:
-        x = [p.numel() for _,p in model.named_parameters() if p.requires_grad]
-    return sum(x) / (1024 * 1024)
-
-
-# def count_parameters(model,model_name):
-#     if model_name in ['GoogleNet','GoogleNet_Attention','ResNet','ResNet_Attention']:
-#         x = [param.numel() for name,param in model.named_parameters() if param.requires_grad and 'fc' not in name]
-#     elif model_name in ['EfficientNet','EfficientNet_Attention','MobileNet','MobileNet_Attention']:
-#         x = [param.numel() for name,param in model.named_parameters() if param.requires_grad and 'classifier' not in name]
-#     return sum(x) / (1024 * 1024)
-
-# Funtion printing the number of parameters of models
-def report_params(model_name,
-                  Scale,
-                  Softmax_axis,
-                  Balance,
-                  Positional_encoding,
-                  Positional_encoding_shape,
-                  Positional_encoding_way,
-                  Dropout_on,
-                  Dropout_ratio,
-                  Classifier_on,
-                  CLS_on,
-                  CLS_mix,
-                  key_value_emb,
-                  Skip_connection,
-                  Layernorm):
-    if model_name in ['FSGM','FSGM_Attention']:
-        from models.FSGM import CSTA_FSGM
-        model = CSTA_FSGM(
-            model_name=model_name,
-            Scale=Scale,
-            Softmax_axis=Softmax_axis,
-            Balance=Balance,
-            Positional_encoding=Positional_encoding,
-            Positional_encoding_shape=Positional_encoding_shape,
-            Positional_encoding_way=Positional_encoding_way,
-            Dropout_on=Dropout_on,
-            Dropout_ratio=Dropout_ratio,
-            Classifier_on=Classifier_on,
-            CLS_on=CLS_on,
-            CLS_mix=CLS_mix,
-            key_value_emb=key_value_emb,
-            Skip_connection=Skip_connection,
-            Layernorm=Layernorm,
-        )
-
-    if model_name in ['EfficientNet','EfficientNet_Attention']:
-        model = CSTA_EfficientNet(
-            model_name=model_name,
-            Scale=Scale,
-            Softmax_axis=Softmax_axis,
-            Balance=Balance,
-            Positional_encoding=Positional_encoding,
-            Positional_encoding_shape=Positional_encoding_shape,
-            Positional_encoding_way=Positional_encoding_way,
-            Dropout_on=Dropout_on,
-            Dropout_ratio=Dropout_ratio,
-            Classifier_on=Classifier_on,
-            CLS_on=CLS_on,
-            CLS_mix=CLS_mix,
-            key_value_emb=key_value_emb,
-            Skip_connection=Skip_connection,
-            Layernorm=Layernorm
-        )
-    elif model_name in ['GoogleNet','GoogleNet_Attention']:
-        model = CSTA_GoogleNet(
-            model_name=model_name,
-            Scale=Scale,
-            Softmax_axis=Softmax_axis,
-            Balance=Balance,
-            Positional_encoding=Positional_encoding,
-            Positional_encoding_shape=Positional_encoding_shape,
-            Positional_encoding_way=Positional_encoding_way,
-            Dropout_on=Dropout_on,
-            Dropout_ratio=Dropout_ratio,
-            Classifier_on=Classifier_on,
-            CLS_on=CLS_on,
-            CLS_mix=CLS_mix,
-            key_value_emb=key_value_emb,
-            Skip_connection=Skip_connection,
-            Layernorm=Layernorm
-        )
-    elif model_name in ['MobileNet','MobileNet_Attention']:
-        model = CSTA_MobileNet(
-            model_name=model_name,
-            Scale=Scale,
-            Softmax_axis=Softmax_axis,
-            Balance=Balance,
-            Positional_encoding=Positional_encoding,
-            Positional_encoding_shape=Positional_encoding_shape,
-            Positional_encoding_way=Positional_encoding_way,
-            Dropout_on=Dropout_on,
-            Dropout_ratio=Dropout_ratio,
-            Classifier_on=Classifier_on,
-            CLS_on=CLS_on,
-            CLS_mix=CLS_mix,
-            key_value_emb=key_value_emb,
-            Skip_connection=Skip_connection,
-            Layernorm=Layernorm
-        )
-    elif model_name in ['ResNet','ResNet_Attention']:
-        model = CSTA_ResNet(
-            model_name=model_name,
-            Scale=Scale,
-            Softmax_axis=Softmax_axis,
-            Balance=Balance,
-            Positional_encoding=Positional_encoding,
-            Positional_encoding_shape=Positional_encoding_shape,
-            Positional_encoding_way=Positional_encoding_way,
-            Dropout_on=Dropout_on,
-            Dropout_ratio=Dropout_ratio,
-            Classifier_on=Classifier_on,
-            CLS_on=CLS_on,
-            CLS_mix=CLS_mix,
-            key_value_emb=key_value_emb,
-            Skip_connection=Skip_connection,
-            Layernorm=Layernorm
-        )
-    print(f"PARAMS: {count_parameters(model,model_name):.2f}M")
+# Print the number of parameters (millions) and the size of the 32-bit weights (MB), as in Table 4
+def report_params(model):
+    n = count_parameters(model)
+    print(f"PARAMS: {n / 1e6:.2f}M ({n * 4 / 2**20:.2f} MB)")
 
 # Print all arguments and GPU setting
 def print_args(args):
@@ -176,4 +47,4 @@ def get_gt(dataset):
     elif dataset=='SumMe':
         return None
     else:
-        raise
+        raise ValueError(f"Unknown dataset: {dataset}")

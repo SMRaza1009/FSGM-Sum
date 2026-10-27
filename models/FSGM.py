@@ -12,62 +12,93 @@ from models.positional_encoding import (
 
 
 class _FSGMAttention(nn.Module):
-    """Factorized spatiotemporal attention logit generator for (T x D)."""
+    """Factorized spatio-temporal gate: [T, D] key sequence -> [T, D] gate logits.
+
+    Temporal branch: projection -> parallel dilated depthwise-separable Conv1d
+    blocks -> 1x1 head, plus an FFT spectral bias (Sec. 3.3.1-3.3.2).
+    Channel branch: temporal mean/max pooling -> bottleneck MLP (Sec. 3.3.3).
+    The two logit vectors are fused by an outer sum (Sec. 3.3.4).
+    """
 
     def __init__(
         self,
         dim: int,
         hidden: int = 64,
         channel_reduction: int = 16,
-        use_fft_bias: bool = True,
+        dilations=(1, 2, 4),
+        fft_bias: str = 'timestep',
+        branches: str = 'both',
+        pooling: str = 'meanmax',
+        fusion: str = 'add',
         eps: float = 1e-6,
     ):
         super().__init__()
+        if fft_bias not in ('timestep', 'scalar', 'none'):
+            raise ValueError(f"Unknown fft_bias={fft_bias}")
+        if branches not in ('both', 'temporal', 'channel'):
+            raise ValueError(f"Unknown branches={branches}")
+        if pooling not in ('meanmax', 'mean', 'max'):
+            raise ValueError(f"Unknown pooling={pooling}")
+        if fusion not in ('add', 'mul'):
+            raise ValueError(f"Unknown fusion={fusion}")
+
         self.dim = int(dim)
         self.hidden = int(hidden)
-        self.use_fft_bias = bool(use_fft_bias)
+        self.fft_bias = fft_bias
+        self.branches = branches
+        self.pooling = pooling
+        self.fusion = fusion
         self.eps = float(eps)
+        self.use_temporal = branches in ('both', 'temporal')
+        self.use_channel = branches in ('both', 'channel')
 
         # Temporal branch
-        self.temporal_proj = nn.Linear(self.dim, self.hidden)
+        if self.use_temporal:
+            self.temporal_proj = nn.Linear(self.dim, self.hidden)
 
-        def _dw_pw_block(dilation: int) -> nn.Sequential:
-            return nn.Sequential(
-                nn.Conv1d(
-                    in_channels=self.hidden,
-                    out_channels=self.hidden,
-                    kernel_size=3,
-                    padding=dilation,
-                    dilation=dilation,
-                    groups=self.hidden,
-                    bias=False,
-                ),
-                nn.Conv1d(self.hidden, self.hidden, kernel_size=1, bias=False),
-                nn.GELU(),
-                nn.BatchNorm1d(self.hidden, eps=self.eps),
-            )
+            def _dw_pw_block(dilation: int) -> nn.Sequential:
+                return nn.Sequential(
+                    nn.Conv1d(
+                        in_channels=self.hidden,
+                        out_channels=self.hidden,
+                        kernel_size=3,
+                        padding=dilation,
+                        dilation=dilation,
+                        groups=self.hidden,
+                        bias=False,
+                    ),
+                    nn.Conv1d(self.hidden, self.hidden, kernel_size=1, bias=False),
+                    nn.GELU(),
+                    nn.BatchNorm1d(self.hidden, eps=self.eps),
+                )
 
-        self.temporal_blocks = nn.ModuleList([
-            _dw_pw_block(1),
-            _dw_pw_block(2),
-            _dw_pw_block(4),
-        ])
-        self.temporal_head = nn.Conv1d(self.hidden, 1, kernel_size=1, bias=True)
+            self.temporal_blocks = nn.ModuleList([_dw_pw_block(int(d)) for d in dilations])
+            self.temporal_head = nn.Conv1d(self.hidden, 1, kernel_size=1, bias=True)
+
+            # Per-timestep spectral bias: g_fft = Conv1d(1->8,k=3) -> GELU -> Conv1d(8->1,k=3)
+            # over frequency bins, mapped back to time with an inverse real FFT.
+            if self.fft_bias == 'timestep':
+                self.fft_filter = nn.Sequential(
+                    nn.Conv1d(1, 8, kernel_size=3, padding=1),
+                    nn.GELU(),
+                    nn.Conv1d(8, 1, kernel_size=3, padding=1),
+                )
+            # Ablation only: one scalar added to every timestep (cancelled by the temporal softmax).
+            elif self.fft_bias == 'scalar':
+                self.fft_scale = nn.Sequential(
+                    nn.Linear(1, 8),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(8, 1),
+                )
 
         # Channel branch
-        red = max(4, self.dim // max(1, int(channel_reduction)))
-        self.channel_mlp = nn.Sequential(
-            nn.Linear(self.dim * 2, red),
-            nn.ReLU(inplace=True),
-            nn.Linear(red, self.dim),
-        )
-
-        # Optional spectrum bias (very lightweight)
-        if self.use_fft_bias:
-            self.fft_scale = nn.Sequential(
-                nn.Linear(1, 8),
+        if self.use_channel:
+            red = max(4, self.dim // max(1, int(channel_reduction)))
+            in_dim = self.dim * 2 if self.pooling == 'meanmax' else self.dim
+            self.channel_mlp = nn.Sequential(
+                nn.Linear(in_dim, red),
                 nn.ReLU(inplace=True),
-                nn.Linear(8, 1),
+                nn.Linear(red, self.dim),
             )
 
         # Init
@@ -81,6 +112,15 @@ class _FSGMAttention(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0.0)
 
+    def _spectral_bias(self, seq: torch.Tensor) -> torch.Tensor:
+        """seq: [T, D] -> per-timestep bias b: [T] (Eqs. for s, m, m~, b in Sec. 3.3.2)."""
+        T = seq.shape[0]
+        s = seq.mean(dim=1)                                   # [T]
+        mag = torch.abs(torch.fft.rfft(s, dim=0))             # [F], F = T//2 + 1
+        mag_f = self.fft_filter(mag.view(1, 1, -1)).view(-1)  # [F]
+        b = torch.fft.irfft(torch.complex(mag_f, torch.zeros_like(mag_f)), n=T, dim=0)  # [T]
+        return b / (b.std() + self.eps)
+
     def forward(self, seq: torch.Tensor) -> torch.Tensor:
         """seq: [T, D] -> logits: [T, D]"""
         if seq.dim() != 2:
@@ -90,32 +130,47 @@ class _FSGMAttention(nn.Module):
             raise ValueError(f"Feature dim mismatch: expected {self.dim}, got {D}")
 
         # Temporal logits
-        h = self.temporal_proj(seq)               # [T, hidden]
-        h = h.transpose(0, 1).unsqueeze(0)        # [1, hidden, T]
-        mix = 0.0
-        for blk in self.temporal_blocks:
-            mix = mix + blk(h)
-        mix = mix / float(len(self.temporal_blocks))
-        temporal_logits = self.temporal_head(mix).squeeze(0).squeeze(0)  # [T]
+        if self.use_temporal:
+            h = self.temporal_proj(seq)               # [T, hidden]
+            h = h.transpose(0, 1).unsqueeze(0)        # [1, hidden, T]
+            mix = 0.0
+            for blk in self.temporal_blocks:
+                mix = mix + blk(h)
+            mix = mix / float(len(self.temporal_blocks))
+            temporal_logits = self.temporal_head(mix).squeeze(0).squeeze(0)  # [T]
 
-        if self.use_fft_bias:
-            s = seq.mean(dim=1)  # [T]
-            mag = torch.abs(torch.fft.rfft(s, dim=0))
-            stat = mag.mean().clamp(min=self.eps)
-            bias = self.fft_scale(stat.view(1, 1)).view(())
-            temporal_logits = temporal_logits + bias
+            if self.fft_bias == 'timestep':
+                temporal_logits = temporal_logits + self._spectral_bias(seq)
+            elif self.fft_bias == 'scalar':
+                s = seq.mean(dim=1)
+                mag = torch.abs(torch.fft.rfft(s, dim=0))
+                stat = mag.mean().clamp(min=self.eps)
+                temporal_logits = temporal_logits + self.fft_scale(stat.view(1, 1)).view(())
 
         # Channel logits
-        mean_pool = seq.mean(dim=0)          # [D]
-        max_pool = seq.max(dim=0).values     # [D]
-        feat_desc = torch.cat([mean_pool, max_pool], dim=0)  # [2D]
-        feature_logits = self.channel_mlp(feat_desc)         # [D]
+        if self.use_channel:
+            if self.pooling == 'meanmax':
+                feat_desc = torch.cat([seq.mean(dim=0), seq.max(dim=0).values], dim=0)  # [2D]
+            elif self.pooling == 'mean':
+                feat_desc = seq.mean(dim=0)           # [D]
+            else:
+                feat_desc = seq.max(dim=0).values     # [D]
+            feature_logits = self.channel_mlp(feat_desc)  # [D]
 
-        return temporal_logits.unsqueeze(1) + feature_logits.unsqueeze(0)  # [T, D]
+        if self.branches == 'temporal':
+            return temporal_logits.unsqueeze(1).expand(T, D)
+        if self.branches == 'channel':
+            return feature_logits.unsqueeze(0).expand(T, D)
+        if self.fusion == 'mul':
+            return temporal_logits.unsqueeze(1) * feature_logits.unsqueeze(0)  # [T, D]
+        return temporal_logits.unsqueeze(1) + feature_logits.unsqueeze(0)      # [T, D]
 
 
-class CSTA_FSGM(nn.Module):
-    """Plug-and-play model (replaces CSTA_*). Adds calibrated sigmoid (learnable temperature)."""
+class FSGMSum(nn.Module):
+    """FSGM-Sum frame-importance model with a temperature-calibrated sigmoid head.
+
+    Input: [1, 3, T, 1024] replicated frame features. Output: [T] scores in [0, 1].
+    """
 
     def __init__(
         self,
@@ -137,8 +192,13 @@ class CSTA_FSGM(nn.Module):
         dim: int = 1024,
         fsgm_hidden: int = 64,
         fsgm_channel_reduction: int = 16,
-        fsgm_use_fft_bias: bool = True,
+        fsgm_dilations=(1, 2, 4),
+        fsgm_fft_bias: str = 'timestep',
+        fsgm_branches: str = 'both',
+        fsgm_pooling: str = 'meanmax',
+        fsgm_fusion: str = 'add',
         # temperature calibration
+        temp_learnable: bool = True,
         temp_init: float = 1.0,
         temp_min: float = 0.2,
         temp_max: float = 5.0,
@@ -168,9 +228,15 @@ class CSTA_FSGM(nn.Module):
 
         # --- calibrated sigmoid temperature ---
         # Unconstrained scalar -> positive temp via softplus; clamp to avoid extremes.
-        self._temp_unconstrained = nn.Parameter(torch.tensor(float(temp_init)))
+        # With temp_learnable=False the temperature is fixed at gamma=1 (ablation).
+        self.temp_learnable = bool(temp_learnable)
+        if self.temp_learnable:
+            self._temp_unconstrained = nn.Parameter(torch.tensor(float(temp_init)))
         self._temp_min = float(temp_min)
         self._temp_max = float(temp_max)
+
+        # fsgm_branches='none' bypasses the gate entirely (base regressor ablation)
+        self.use_gate = fsgm_branches != 'none'
 
         # Positional encoding
         if self.Positional_encoding is not None:
@@ -244,7 +310,7 @@ class CSTA_FSGM(nn.Module):
             else:
                 raise ValueError(f"Unknown key_value_emb={self.key_value_emb}")
 
-        # Layer norms (same as CSTA codebase)
+        # Normalization after the key residual
         if self.Layernorm:
             if self.Skip_connection == 'KC':
                 self.layernorm1 = nn.BatchNorm2d(num_features=1)
@@ -257,14 +323,21 @@ class CSTA_FSGM(nn.Module):
             else:
                 raise ValueError(f"Unknown Skip_connection={self.Skip_connection}")
 
-        self.fsgm = _FSGMAttention(
-            dim=self.dim,
-            hidden=fsgm_hidden,
-            channel_reduction=fsgm_channel_reduction,
-            use_fft_bias=fsgm_use_fft_bias,
-        )
+        if self.use_gate:
+            self.fsgm = _FSGMAttention(
+                dim=self.dim,
+                hidden=fsgm_hidden,
+                channel_reduction=fsgm_channel_reduction,
+                dilations=fsgm_dilations,
+                fft_bias=fsgm_fft_bias,
+                branches=fsgm_branches,
+                pooling=fsgm_pooling,
+                fusion=fsgm_fusion,
+            )
 
     def _temperature(self) -> torch.Tensor:
+        if not self.temp_learnable:
+            return torch.tensor(1.0)
         t = F.softplus(self._temp_unconstrained) + self._temp_min
         return torch.clamp(t, min=self._temp_min, max=self._temp_max)
 
@@ -294,8 +367,12 @@ class CSTA_FSGM(nn.Module):
         else:
             raise
 
-        # Collapse B and C (consistent with CSTA repo convention)
+        # The three input channels are identical replicas; use the first one
         key_seq = key.squeeze(0)[0]  # [T(+1), D]
+
+        if not self.use_gate:
+            return self._head(x.squeeze(0)[0], n_frame)
+
         x_att = self.fsgm(key_seq)   # [T(+1), D]
 
         # KC skip
@@ -390,9 +467,12 @@ class CSTA_FSGM(nn.Module):
         elif self.Softmax_axis is None:
             x_out = x_out * x_att
 
-        # Final CLS adjust
+        return self._head(x_out, n_frame)
+
+    def _head(self, x_out: torch.Tensor, n_frame: int) -> torch.Tensor:
+        """Final CLS pooling + temperature-calibrated classifier: [T(+1), D] -> [T]."""
         if self.CLS_on and self.CLS_mix == 'Final':
-            x_out = CT_adjust(x_out.unsqueeze(0)).squeeze(0)
+            x_out = nn.AdaptiveAvgPool2d((n_frame, self.dim))(x_out.unsqueeze(0)).squeeze(0)
 
         # classifier
         if self.Classifier_on:

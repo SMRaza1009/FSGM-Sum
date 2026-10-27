@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from config import get_config
 from generate_summary import generate_summary
-from CSTA.model_failed import set_model
+from model import build_model
 from video_helper import VideoPreprocessor
 
 def pick_frames(video_path, selections):
@@ -62,24 +62,8 @@ def main():
     else:
         video_paths = sorted(Path(config.dir_path).glob(f'*.{config.ext}'))
 
-    # Load CSTA weights
-    model = set_model(
-        model_name=config.model_name,
-        Scale=config.Scale,
-        Softmax_axis=config.Softmax_axis,
-        Balance=config.Balance,
-        Positional_encoding=config.Positional_encoding,
-        Positional_encoding_shape=config.Positional_encoding_shape,
-        Positional_encoding_way=config.Positional_encoding_way,
-        Dropout_on=config.Dropout_on,
-        Dropout_ratio=config.Dropout_ratio,
-        Classifier_on=config.Classifier_on,
-        CLS_on=config.CLS_on,
-        CLS_mix=config.CLS_mix,
-        key_value_emb=config.key_value_emb,
-        Skip_connection=config.Skip_connection,
-        Layernorm=config.Layernorm
-    )
+    # Load FSGM-Sum weights
+    model = build_model(config)
     model.load_state_dict(torch.load(config.weight_path, map_location='cpu'))
     model.to(config.device)
     model.eval()
