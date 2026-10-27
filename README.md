@@ -183,8 +183,10 @@ If you use this code, please cite:
 
 ```bibtex
 @article{raza2026fsgmsum,
-  title   = {FSGM-Sum: Factorized Spatio-Temporal Gating Mixer for Efficient Video Summarization},
+  title   = {{FSGM-Sum}: Factorized Spatio-Temporal Gating Mixer for Efficient Video Summarization},
   author  = {Raza, Syed Muhammad and Tariq, Omer},
+  journal = {Pattern Recognition},
+  note    = {under review},
   year    = {2026}
 }
 ```
@@ -192,6 +194,11 @@ If you use this code, please cite:
 ## Acknowledgements
 
 The SumMe and TVSum feature files are distributed by [PGL-SUM](https://github.com/e-apostolidis/PGL-SUM). Kernel temporal segmentation (`kts/`) is from [LEAR](http://lear.inrialpes.fr/software), via [DSNet](https://github.com/li-plus/DSNet).
+
+## License
+
+MIT
+
 
 ## License
 
